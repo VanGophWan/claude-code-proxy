@@ -124,6 +124,8 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+.env
+.env.nvidia
 .venv
 env/
 venv/
