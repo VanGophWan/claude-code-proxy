@@ -3,6 +3,7 @@ from src.api.endpoints import router as api_router
 import uvicorn
 import sys
 from src.core.config import config
+from src.core.model_validator import run_model_validation
 
 app = FastAPI(title="Claude-to-OpenAI API Proxy", version="1.0.0")
 
@@ -51,6 +52,9 @@ def main():
     print(f"   Server: {config.host}:{config.port}")
     print(f"   Client API Key Validation: {'Enabled' if config.anthropic_api_key else 'Disabled'}")
     print("")
+
+    # Validate configured models at startup
+    run_model_validation()
 
     # Parse log level - extract just the first word to handle comments
     log_level = config.log_level.split()[0].lower()

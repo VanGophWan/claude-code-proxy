@@ -3,9 +3,10 @@
 A proxy server that enables Claude Code to work with OpenAI-compatible API providers.
 """
 
+import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(os.environ.get("ENV_FILE", ".env"))
 __version__ = "1.0.0"
 __author__ = "Claude Code Proxy"

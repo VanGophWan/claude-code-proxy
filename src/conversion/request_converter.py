@@ -9,6 +9,36 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _content_to_text(content) -> str:
+    """Flatten a Claude content value (str or list of text blocks) into a single string."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == Constants.CONTENT_TEXT:
+                    text_parts.append(block.get("text", ""))
+            elif hasattr(block, "type") and block.type == Constants.CONTENT_TEXT:
+                text_parts.append(block.text)
+        return "\n\n".join(text_parts)
+    return ""
+
+
+def _extract_system_text(claude_request: ClaudeMessagesRequest) -> str:
+    """Collect the system prompt from the top-level `system` field and any
+    `system`-role messages, combining them in order."""
+    parts = []
+    if claude_request.system:
+        parts.append(_content_to_text(claude_request.system))
+    for msg in claude_request.messages:
+        if msg.role == Constants.ROLE_SYSTEM:
+            parts.append(_content_to_text(msg.content))
+    return "\n\n".join(p for p in parts if p and p.strip()).strip()
+
+
 def convert_claude_to_openai(
     claude_request: ClaudeMessagesRequest, model_manager
 ) -> Dict[str, Any]:
@@ -17,46 +47,43 @@ def convert_claude_to_openai(
     # Map model
     openai_model = model_manager.map_claude_model_to_openai(claude_request.model)
 
-    # Convert messages
+    # Extract system prompt from top-level `system` field and system-role messages.
+    # Some OpenAI-compatible providers (e.g. Ollama, certain local models) reject
+    # both `role: "system"` in the messages array and a top-level `system` key in
+    # the request body.  To maximise compatibility, we fold the system prompt into
+    # the first user message instead.
+    system_text = _extract_system_text(claude_request)
+
+    # Convert messages (skip system-role messages — they're folded into system_text)
+    messages = [
+        msg for msg in claude_request.messages if msg.role != Constants.ROLE_SYSTEM
+    ]
     openai_messages = []
 
-    # Add system message if present
-    if claude_request.system:
-        system_text = ""
-        if isinstance(claude_request.system, str):
-            system_text = claude_request.system
-        elif isinstance(claude_request.system, list):
-            text_parts = []
-            for block in claude_request.system:
-                if hasattr(block, "type") and block.type == Constants.CONTENT_TEXT:
-                    text_parts.append(block.text)
-                elif (
-                    isinstance(block, dict)
-                    and block.get("type") == Constants.CONTENT_TEXT
-                ):
-                    text_parts.append(block.get("text", ""))
-            system_text = "\n\n".join(text_parts)
-
-        if system_text.strip():
-            openai_messages.append(
-                {"role": Constants.ROLE_SYSTEM, "content": system_text.strip()}
-            )
-
-    # Process Claude messages
     i = 0
-    while i < len(claude_request.messages):
-        msg = claude_request.messages[i]
+    while i < len(messages):
+        msg = messages[i]
 
         if msg.role == Constants.ROLE_USER:
             openai_message = convert_claude_user_message(msg)
+            # Prepend system text to the first user message for providers that
+            # do not support a separate system parameter.
+            if system_text and not openai_messages:
+                if isinstance(openai_message["content"], str):
+                    openai_message["content"] = f"{system_text}\n\n{openai_message['content']}"
+                elif isinstance(openai_message["content"], list):
+                    openai_message["content"].insert(
+                        0, {"type": "text", "text": f"{system_text}\n\n"}
+                    )
+                system_text = ""  # Consumed — don't add as top-level param
             openai_messages.append(openai_message)
         elif msg.role == Constants.ROLE_ASSISTANT:
             openai_message = convert_claude_assistant_message(msg)
             openai_messages.append(openai_message)
 
             # Check if next message contains tool results
-            if i + 1 < len(claude_request.messages):
-                next_msg = claude_request.messages[i + 1]
+            if i + 1 < len(messages):
+                next_msg = messages[i + 1]
                 if (
                     next_msg.role == Constants.ROLE_USER
                     and isinstance(next_msg.content, list)
@@ -84,6 +111,10 @@ def convert_claude_to_openai(
         "temperature": claude_request.temperature,
         "stream": claude_request.stream,
     }
+    # If the only user message was a tool-result, system_text may not have been
+    # consumed above.  Try the top-level "system" parameter as a fallback.
+    if system_text:
+        openai_request["system"] = system_text
     logger.debug(
         f"Converted Claude request to OpenAI format: {json.dumps(openai_request, indent=2, ensure_ascii=False)}"
     )

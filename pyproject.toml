@@ -38,9 +38,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/holegots/claude-code-proxy"
-Repository = "https://github.com/holegots/claude-code-proxy.git"
-Issues = "https://github.com/holegots/claude-code-proxy/issues"
+Homepage = "https://github.com/VanGophWan/claude-code-proxy"
+Repository = "https://github.com/VanGophWan/claude-code-proxy.git"
+Issues = "https://github.com/VanGophWan/claude-code-proxy/issues"
 
 [project.scripts]
 claude-code-proxy = "src.main:main"
